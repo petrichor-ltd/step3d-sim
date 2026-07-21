@@ -1,0 +1,22 @@
+.DS_Store
+
+# Never commit uploaded or test CAD archives/models.
+*.zip
+*.step
+*.stp
+*.stpz
+*.iges
+*.igs
+*.stl
+*.obj
+*.gltf
+*.glb
+*.3mf
+
+# Common local/generated model directories.
+uploads/
+models/
+fixtures/
+derived/
+parts-manifest.json
+_site/

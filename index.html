@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="dark">
+  <meta name="description" content="在瀏覽器本機解壓縮 STEP 專案 ZIP，並建立可搜尋、量測與爆炸檢視的互動 3D 組立。">
+  <meta name="theme-color" content="#0b0e13">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="STEP/3D · 本機 STEP 專案檢視器">
+  <meta property="og:description" content="上傳 STEP 專案 ZIP，在瀏覽器本機建立互動 3D 組立。">
+  <meta property="og:image" content="./og.png">
+  <meta property="og:image:alt" content="STEP/3D 本機 CAD 工作區與泛用爆炸機構示意">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta name="twitter:card" content="summary_large_image">
+  <title>STEP/3D · 本機 STEP 專案檢視器</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "./vendor/three/three.module.js",
+        "three/addons/": "./vendor/three/addons/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <main class="upload-screen" id="upload-screen">
+    <header class="upload-header">
+      <a class="wordmark" href="./" aria-label="STEP/3D 首頁">
+        <span class="wordmark-mark" aria-hidden="true">S3</span>
+        <span>STEP/3D</span>
+      </a>
+      <span class="privacy-badge"><i aria-hidden="true"></i>全程留在瀏覽器</span>
+    </header>
+
+    <section class="upload-hero" aria-labelledby="upload-title">
+      <div class="hero-copy">
+        <p class="eyebrow">LOCAL-FIRST CAD WORKSPACE</p>
+        <h1 id="upload-title">把 STEP 專案<br>直接帶進瀏覽器。</h1>
+        <p class="hero-lede">上傳一個包含組立與零件的 ZIP。系統會在這台裝置上解壓縮、辨識主模型，並建立可互動的 3D 檢視畫面。</p>
+        <ul class="feature-list" aria-label="檢視器功能">
+          <li><span>01</span>零件樹、搜尋與分類</li>
+          <li><span>02</span>隔離、隱藏與爆炸檢視</li>
+          <li><span>03</span>網格、標準視角與兩點量測</li>
+          <li><span>04</span>包圍盒與幾何統計</li>
+        </ul>
+      </div>
+
+      <div class="upload-card">
+        <div class="format-lock"><span>ONLY</span><strong>.ZIP</strong></div>
+        <div class="drop-zone" id="drop-zone">
+          <input id="zip-input" type="file" accept=".zip,application/zip,application/x-zip-compressed" hidden>
+          <span class="drop-icon" aria-hidden="true"><i></i><b>+</b></span>
+          <h2>放入你的 STEP 專案</h2>
+          <p>拖曳 ZIP 到這裡，或從裝置選擇檔案</p>
+          <button class="primary-button" id="choose-zip" type="button" aria-describedby="upload-help upload-error">選擇 ZIP 檔</button>
+        </div>
+        <p class="upload-error" id="upload-error" role="alert" hidden></p>
+        <div class="upload-status" id="upload-status" aria-live="polite" hidden>
+          <div class="progress-track"><span id="upload-progress"></span></div>
+          <p id="upload-status-text">正在檢查專案…</p>
+        </div>
+        <div class="upload-rules" id="upload-help">
+          <p><span aria-hidden="true">✓</span>檔案副檔名必須是 <strong>.zip</strong></p>
+          <p><span aria-hidden="true">✓</span>ZIP 內至少包含一個 <strong>.step</strong> 或 <strong>.stp</strong></p>
+          <p><span aria-hidden="true">i</span>建議主組立命名包含 assembly、assy、main，或與 ZIP 同名</p>
+        </div>
+        <p class="local-note"><span aria-hidden="true">⌁</span>不需登入、不連 CAD 伺服器；重新整理後模型即從記憶體移除。</p>
+      </div>
+    </section>
+
+    <footer class="upload-footer">
+      <span>STEP AP203 / AP214 / AP242</span>
+      <span>瀏覽器端 Open Cascade + WebGL</span>
+      <span>ZIP 上限 500 MB</span>
+    </footer>
+  </main>
+
+  <div class="app-shell" id="viewer-app" hidden>
+    <header class="topbar">
+      <div class="brand-block">
+        <button class="icon-button mobile-only" id="open-navigator" type="button" aria-label="開啟零件清單">☰</button>
+        <div class="brand-mark" aria-hidden="true">S3</div>
+        <div>
+          <p class="eyebrow">LOCAL STEP WORKSPACE</p>
+          <h1 id="project-title">STEP 組立檢視器</h1>
+        </div>
+      </div>
+      <div class="topbar-meta">
+        <span class="status-pill local"><i aria-hidden="true"></i>僅本機</span>
+        <span class="status-pill" id="model-summary">準備載入</span>
+        <button class="secondary-button new-project-button" id="new-project" type="button">開啟其他 ZIP</button>
+        <button class="icon-button mobile-only" id="open-details" type="button" aria-label="開啟零件資訊">ⓘ</button>
+      </div>
+    </header>
+
+    <div class="workspace">
+      <aside class="panel navigator-panel" id="navigator-panel" aria-label="零件導覽">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">ASSEMBLY TREE</p>
+            <h2>零件導覽</h2>
+          </div>
+          <button class="icon-button mobile-only" data-close-panel="navigator-panel" type="button" aria-label="關閉零件清單">×</button>
+        </div>
+
+        <label class="file-select-field" for="step-file-select">
+          <span>目前檢視的 STEP</span>
+          <select id="step-file-select" aria-label="切換 ZIP 內的 STEP 檔"></select>
+        </label>
+
+        <label class="search-field" for="part-search">
+          <span aria-hidden="true">⌕</span>
+          <input id="part-search" type="search" placeholder="搜尋名稱或來源節點" autocomplete="off">
+        </label>
+
+        <div class="category-filters" id="category-filters" aria-label="依組立分支篩選"></div>
+
+        <div class="list-heading">
+          <span>零件類型</span>
+          <span id="visible-part-count">0 / 0</span>
+        </div>
+        <ul class="part-list" id="part-list" aria-label="STEP 零件清單"></ul>
+
+        <div class="panel-note">
+          <span class="note-icon" aria-hidden="true">!</span>
+          <p>名稱、分類、數量與尺寸皆由上傳內容自動推導，不代表受控 BOM、公差或製造規格。</p>
+        </div>
+      </aside>
+
+      <main class="viewer-stage" id="viewer-stage">
+        <div class="toolbar" role="toolbar" aria-label="3D 檢視控制">
+          <div class="toolbar-group">
+            <button type="button" data-action="fit-all" title="全部置中（F）">全部置中</button>
+            <button type="button" data-action="fit-selection" title="置中所選零件">置中所選</button>
+          </div>
+          <span class="toolbar-separator" aria-hidden="true"></span>
+          <div class="toolbar-group view-buttons" aria-label="標準視角">
+            <button type="button" data-view="front">前</button>
+            <button type="button" data-view="top">上</button>
+            <button type="button" data-view="right">右</button>
+            <button type="button" data-view="iso">等角</button>
+          </div>
+          <span class="toolbar-separator" aria-hidden="true"></span>
+          <div class="toolbar-group">
+            <button type="button" data-action="isolate" title="隔離所選（I）">隔離</button>
+            <button type="button" data-action="hide" title="隱藏所選（H）">隱藏</button>
+            <button type="button" data-action="show-all">顯示全部</button>
+          </div>
+          <span class="toolbar-separator" aria-hidden="true"></span>
+          <div class="toolbar-group measurement-actions">
+            <button type="button" data-action="toggle-measure" aria-pressed="false" title="兩點參考量測（M）">量測</button>
+            <button type="button" data-action="clear-measure" title="清除量測結果">清除量測</button>
+          </div>
+          <div class="toolbar-spacer"></div>
+          <div class="toolbar-group compact-actions">
+            <button type="button" data-action="toggle-color" aria-pressed="true" title="切換分類色／STEP 原色">分類色</button>
+            <button type="button" data-action="toggle-wireframe" aria-pressed="false" title="顯示 tessellation 三角網格">網格</button>
+          </div>
+        </div>
+
+        <canvas id="viewer-canvas" tabindex="0" aria-label="三維 STEP 組立；可拖曳旋轉、滾輪縮放，點擊零件選取"></canvas>
+
+        <div class="load-card" id="load-card" role="status" aria-live="polite">
+          <div class="loader-orbit" aria-hidden="true"><span></span></div>
+          <div class="load-copy">
+            <p class="eyebrow">LOCAL PROCESSING</p>
+            <h2 id="load-title">正在準備 STEP</h2>
+            <p id="load-message">模型只在這台電腦的瀏覽器中處理，不會上傳。</p>
+            <div class="progress-track" aria-hidden="true"><span id="load-progress"></span></div>
+            <button class="secondary-button load-retry" id="load-retry" type="button" hidden>返回選擇 ZIP</button>
+          </div>
+        </div>
+
+        <div class="stage-message" id="stage-message" aria-live="polite"></div>
+
+        <div class="measurement-readout" id="measurement-readout" aria-live="polite" hidden>
+          <p class="eyebrow">MESH REFERENCE MEASURE</p>
+          <strong id="measurement-distance">請在模型上選第 1 點</strong>
+          <span id="measurement-delta">兩點直線距離；只供 review，不含公差</span>
+          <span id="measurement-points"></span>
+        </div>
+
+        <div class="axis-key" aria-label="座標軸圖例">
+          <span><i class="axis-x"></i>X</span>
+          <span><i class="axis-y"></i>Y</span>
+          <span><i class="axis-z"></i>Z</span>
+          <small>來源 STEP 座標</small>
+        </div>
+
+        <div class="interaction-hint" aria-hidden="true">
+          <span>拖曳旋轉</span><span>滾輪縮放</span><span>右鍵平移</span><span>點擊選取</span>
+        </div>
+      </main>
+
+      <aside class="panel detail-panel" id="detail-panel" aria-label="零件工程資訊">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">DERIVED GEOMETRY</p>
+            <h2>模型資訊</h2>
+          </div>
+          <button class="icon-button mobile-only" data-close-panel="detail-panel" type="button" aria-label="關閉零件資訊">×</button>
+        </div>
+
+        <section class="selection-card" aria-live="polite">
+          <div class="selection-swatch" id="selection-swatch"></div>
+          <div>
+            <p class="eyebrow" id="selection-id">尚未載入</p>
+            <h3 id="selection-name">等待 STEP 專案</h3>
+            <p class="selection-role" id="selection-role">上傳 ZIP 後即可查看組立與零件資料。</p>
+          </div>
+        </section>
+
+        <dl class="data-grid" id="selection-data"></dl>
+
+        <div class="geometry-status" id="geometry-status">
+          <span>瀏覽器推導</span>
+          <p>包圍盒、表面積與體積由 tessellation mesh 計算，皆為無公差近似值。</p>
+        </div>
+
+        <section class="control-section geometry-section">
+          <div class="section-title-row">
+            <div>
+              <p class="eyebrow">SOURCE GEOMETRY</p>
+              <h3>幾何數值</h3>
+            </div>
+          </div>
+          <dl class="metric-list" id="geometry-metrics"></dl>
+          <p class="fine-print">AABB = 沿來源 STEP X／Y／Z 軸的外接包圍盒。數值僅供模型 review。</p>
+        </section>
+
+        <section class="control-section">
+          <div class="section-title-row">
+            <div>
+              <p class="eyebrow">EXPLODED VIEW</p>
+              <h3>爆炸距離</h3>
+            </div>
+            <output id="explode-output" for="explode-range">0%</output>
+          </div>
+          <input id="explode-range" type="range" min="0" max="100" value="0" step="1" aria-label="調整爆炸視圖距離">
+          <p class="fine-print">依 occurrence 空間中心向外展開，只供視覺溝通，不代表裝配順序。</p>
+        </section>
+
+        <section class="archive-section">
+          <p class="eyebrow">SOURCE ARCHIVE</p>
+          <h3>專案 ZIP</h3>
+          <dl class="archive-data" id="archive-data"></dl>
+        </section>
+
+        <a class="download-link is-disabled" id="part-download" aria-disabled="true">下載來源 STEP <span>↗</span></a>
+      </aside>
+    </div>
+  </div>
+
+  <noscript>此檢視器需要 JavaScript 與 WebAssembly。請使用近期版本的 Safari、Chrome、Edge 或 Firefox。</noscript>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>

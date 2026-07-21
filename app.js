@@ -11,6 +11,11 @@ const MAX_EXPANDED_STEP_BYTES = 1500 * 1024 * 1024;
 const MAX_STEP_FILES = 250;
 const MAX_ARCHIVE_ENTRIES = 2500;
 const CATEGORY_COLORS = ['#f5b657', '#6da8ff', '#69d695', '#bf8cff', '#ff7d8a', '#5ed5d1', '#f08fc7', '#a9bd6e'];
+const PART_COLORS = [
+  '#5b8cff', '#f2a65a', '#a78bfa', '#46c2a4', '#ff7d8a', '#a7b0be',
+  '#f5d05f', '#5ec7d7', '#e889c4', '#86bf67', '#e37f62', '#7f9dd8',
+  '#c8925d', '#75c4a8', '#bf80d7', '#d2bb69', '#5eb4ed', '#ef8fa0'
+];
 
 const elements = {
   uploadScreen: $('#upload-screen'),
@@ -75,7 +80,7 @@ const state = {
   isolateKey: null,
   category: 'all',
   search: '',
-  categoryColorMode: true,
+  partColorMode: true,
   wireframe: false,
   explode: 0,
   ready: false,
@@ -604,6 +609,8 @@ function buildManifest(result, entry) {
     return part;
   }).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
 
+  assignPartColors(parts);
+
   state.partsByKey = new Map(parts.map((part) => [part.key, part]));
   return {
     categories,
@@ -620,6 +627,23 @@ function buildManifest(result, entry) {
   };
 }
 
+function assignPartColors(parts) {
+  const colorBySource = new Map();
+  parts.forEach((part) => {
+    const sourceKey = part.fileEntry ? `file:${part.fileEntry.path}` : `node:${part.key}`;
+    if (!colorBySource.has(sourceKey)) colorBySource.set(sourceKey, partColorAt(colorBySource.size));
+    part.color = colorBySource.get(sourceKey);
+    part.colorBasis = part.fileEntry ? '依 STEP 檔' : '依零件節點';
+  });
+}
+
+function partColorAt(index) {
+  if (index < PART_COLORS.length) return PART_COLORS[index];
+  const hue = ((index - PART_COLORS.length) * 137.508 + 31) % 360;
+  const color = new THREE.Color().setHSL(hue / 360, 0.62, 0.62, THREE.SRGBColorSpace);
+  return `#${color.getHexString(THREE.SRGBColorSpace)}`;
+}
+
 function findMatchingStepFile(partName) {
   const target = canonicalName(partName);
   if (!target) return null;
@@ -632,8 +656,8 @@ function findMatchingStepFile(partName) {
   }) ?? null;
 }
 
-function categoryColor(part) {
-  return state.manifest?.categories?.[part?.category]?.color ?? '#a7b0be';
+function partColor(part) {
+  return part?.color ?? state.manifest?.categories?.[part?.category]?.color ?? '#a7b0be';
 }
 
 function buildFilters() {
@@ -685,7 +709,7 @@ function renderPartList() {
     button.type = 'button';
     button.className = 'part-button';
     button.dataset.partKey = part.key;
-    button.style.setProperty('--part-color', categoryColor(part));
+    button.style.setProperty('--part-color', partColor(part));
     button.setAttribute('aria-pressed', part.key === state.selectedKey ? 'true' : 'false');
     button.setAttribute('aria-label', `${part.name}，組立數量 ${part.quantityInAssembly}`);
     button.innerHTML = `
@@ -725,12 +749,12 @@ function createMesh(meshData, part, meshIndex) {
   geometry.computeBoundingBox();
   geometry.computeBoundingSphere();
 
-  const category = new THREE.Color(categoryColor(part));
+  const assigned = new THREE.Color(partColor(part));
   const source = meshData.color
     ? new THREE.Color(meshData.color[0], meshData.color[1], meshData.color[2])
     : new THREE.Color(0xb5becb);
   const material = new THREE.MeshStandardMaterial({
-    color: state.categoryColorMode ? category : source,
+    color: state.partColorMode ? assigned : source,
     roughness: 0.72,
     metalness: 0.04,
     side: THREE.DoubleSide,
@@ -742,7 +766,7 @@ function createMesh(meshData, part, meshIndex) {
   mesh.userData = {
     part,
     partKey: part?.key,
-    categoryColor: category,
+    partColor: assigned,
     sourceColor: source,
     meshIndex
   };
@@ -875,7 +899,7 @@ function setView(view) {
 function setMaterialSelection() {
   state.meshes.forEach((mesh) => {
     const selected = Boolean(state.selectedKey && mesh.userData.partKey === state.selectedKey);
-    mesh.material.emissive.set(selected ? categoryColor(mesh.userData.part) : '#000000');
+    mesh.material.emissive.set(selected ? partColor(mesh.userData.part) : '#000000');
     mesh.material.emissiveIntensity = selected ? 0.42 : 0;
     mesh.material.roughness = selected ? 0.48 : 0.72;
   });
@@ -887,7 +911,7 @@ function setMaterialSelection() {
   }
   const box = selectedBox();
   if (box) {
-    state.selectionHelper = new THREE.Box3Helper(box, new THREE.Color(categoryColor(state.partsByKey.get(state.selectedKey))));
+    state.selectionHelper = new THREE.Box3Helper(box, new THREE.Color(partColor(state.partsByKey.get(state.selectedKey))));
     state.selectionHelper.material.transparent = true;
     state.selectionHelper.material.opacity = 0.72;
     scene.add(state.selectionHelper);
@@ -964,13 +988,13 @@ function showAll() {
 
 function applyColorMode() {
   state.meshes.forEach((mesh) => {
-    const color = state.categoryColorMode ? mesh.userData.categoryColor : mesh.userData.sourceColor;
+    const color = state.partColorMode ? mesh.userData.partColor : mesh.userData.sourceColor;
     mesh.material.color.copy(color);
     mesh.material.needsUpdate = true;
   });
   const button = $('[data-action="toggle-color"]');
-  button.setAttribute('aria-pressed', state.categoryColorMode ? 'true' : 'false');
-  button.textContent = state.categoryColorMode ? '分類色' : 'STEP 原色';
+  button.setAttribute('aria-pressed', state.partColorMode ? 'true' : 'false');
+  button.textContent = state.partColorMode ? '零件色' : 'STEP 原色';
   setMaterialSelection();
 }
 
@@ -1101,12 +1125,13 @@ function updateDetails(part = null) {
     elements.selectionId.textContent = `${part.sourceId} · ${category.label}`;
     elements.selectionName.textContent = part.name;
     elements.selectionRole.textContent = part.role;
-    elements.selectionSwatch.style.background = category.color;
+    elements.selectionSwatch.style.background = partColor(part);
     elements.selectionData.innerHTML = `
       <div><dt>組立數量</dt><dd>${part.quantityInAssembly}（推導）</dd></div>
       <div><dt>Mesh</dt><dd>${part.meshCount}</dd></div>
       <div><dt>顯示單位</dt><dd>mm</dd></div>
       <div><dt>個別 STEP</dt><dd>${part.fileEntry ? '名稱相符' : '未比對到'}</dd></div>
+      <div><dt>檢視配色</dt><dd>${part.colorBasis}</dd></div>
       <div class="wide"><dt>資料狀態</dt><dd>無公差 mesh 參考值，不是製造規格</dd></div>`;
     if (part.fileEntry) setDownload(part.fileEntry, `下載個別 STEP · ${part.fileEntry.name}`);
     else disableDownload('ZIP 內無對應個別 STEP');
@@ -1287,7 +1312,7 @@ function handleToolbar(action) {
       showMessage('已清除參考量測');
       break;
     case 'toggle-color':
-      state.categoryColorMode = !state.categoryColorMode;
+      state.partColorMode = !state.partColorMode;
       applyColorMode();
       break;
     case 'toggle-wireframe':

@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { unzip } from './vendor/fflate/fflate.module.js';
+import { trackUsage } from './analytics.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -211,6 +212,42 @@ function displayNameFromPath(path) {
   return path.split('/').at(-1).replace(STEP_PATTERN, '');
 }
 
+function detectStepSchema(data) {
+  const headerBytes = data.subarray(0, Math.min(data.byteLength, 262_144));
+  const header = new TextDecoder('utf-8').decode(headerBytes);
+  const identifier = header.match(/FILE_SCHEMA\s*\(\s*\(\s*'([^']+)'/i)?.[1]?.trim() ?? '';
+  const normalized = identifier.toUpperCase();
+  if (normalized.includes('AP242') || normalized.includes('MANAGED_MODEL_BASED_3D_ENGINEERING')) {
+    return { label: 'AP242', identifier };
+  }
+  if (normalized.includes('AP214') || normalized.includes('AUTOMOTIVE_DESIGN')) {
+    return { label: 'AP214', identifier };
+  }
+  if (normalized.includes('AP203') || normalized.includes('CONFIG_CONTROL_DESIGN')) {
+    return { label: 'AP203', identifier };
+  }
+  return { label: identifier ? 'Other' : 'Unknown', identifier };
+}
+
+function schemaDisplay(schema) {
+  if (schema?.label === 'Unknown') return 'STEP schema 未辨識';
+  if (schema?.label === 'Other') return '其他 STEP schema';
+  return `STEP ${schema?.label ?? 'schema 未辨識'}`;
+}
+
+function analyticsFailureCode(error) {
+  const message = String(error?.message ?? error).toLocaleLowerCase('zh-Hant');
+  if (message.includes('加密')) return 'encrypted';
+  if (message.includes('zip64')) return 'zip64';
+  if (message.includes('找不到 .step') || message.includes('找不到可讀取')) return 'no_step';
+  if (message.includes('沒有可顯示') || message.includes('有效幾何')) return 'no_geometry';
+  if (message.includes('webassembly') || message.includes('解析')) return 'parse_failed';
+  if (message.includes('記憶體') || message.includes('超過')) return 'size_limit';
+  if (message.includes('壓縮')) return 'compression';
+  if (message.includes('zip')) return 'archive_invalid';
+  return 'unknown';
+}
+
 function canonicalName(value) {
   return String(value ?? '')
     .normalize('NFKC')
@@ -312,6 +349,7 @@ function extractStepFiles(buffer, zipEntries) {
           base: displayNameFromPath(path),
           bytes: data.byteLength,
           data,
+          schema: detectStepSchema(data),
           compressedSize: metadata.get(path)?.compressedSize ?? null
         }));
       resolve(stepFiles);
@@ -360,11 +398,13 @@ async function handleZipFile(file) {
     state.stepFiles = stepFiles.sort((a, b) => a.path.localeCompare(b.path));
     state.detectionReason = primary.reason;
     populateStepFileSelect(primary.entry);
+    trackUsage('zip_accepted', { schema: primary.entry.schema.label });
     setUploadStatus(100, `已選擇主模型：${primary.entry.name}`);
     showViewer();
     await loadStepFile(primary.entry);
   } catch (error) {
     console.error(error);
+    trackUsage('archive_rejected', { failure: analyticsFailureCode(error) });
     showUploadError(error instanceof Error ? error.message : '無法讀取這個 ZIP。');
   } finally {
     elements.zipInput.value = '';
@@ -405,7 +445,7 @@ function populateStepFileSelect(primaryEntry) {
   elements.stepFileSelect.replaceChildren(...ordered.map((entry, index) => {
     const option = document.createElement('option');
     option.value = entry.path;
-    option.textContent = `${index === 0 ? '自動選擇 · ' : ''}${entry.path} · ${formatBytes(entry.bytes)}`;
+    option.textContent = `${index === 0 ? '自動選擇 · ' : ''}[${entry.schema.label}] ${entry.path} · ${formatBytes(entry.bytes)}`;
     return option;
   }));
   elements.stepFileSelect.value = primaryEntry.path;
@@ -505,7 +545,7 @@ async function loadStepFile(entry) {
   elements.modelSummary.textContent = '解析中';
   elements.loadCard.classList.remove('is-hidden', 'is-error');
   elements.loadRetry.hidden = true;
-  setLoadProgress(8, '正在準備主模型', `${entry.path} · ${formatBytes(entry.bytes)}`);
+  setLoadProgress(8, '正在準備主模型', `${schemaDisplay(entry.schema)} · ${entry.path} · ${formatBytes(entry.bytes)}`);
 
   try {
     const startedAt = performance.now();
@@ -536,17 +576,20 @@ async function loadStepFile(entry) {
 
     const elapsedSeconds = ((performance.now() - startedAt) / 1000).toFixed(1);
     state.ready = true;
+    trackUsage('model_opened', { schema: entry.schema.label });
     elements.modelSummary.textContent = `${state.manifest.parts.length} 種 · ${state.manifest.assembly.occurrences} 件 · ${state.meshes.length} mesh`;
     setLoadProgress(100, '模型已就緒', `本機解析完成，用時 ${elapsedSeconds} 秒。`);
     window.setTimeout(() => elements.loadCard.classList.add('is-hidden'), 320);
   } catch (error) {
     if (token !== state.loadToken) return;
     console.error(error);
+    trackUsage('model_failed', { schema: entry.schema.label, failure: analyticsFailureCode(error) });
     elements.modelSummary.textContent = '解析失敗';
     elements.loadCard.classList.remove('is-hidden');
     elements.loadCard.classList.add('is-error');
     elements.loadRetry.hidden = false;
-    setLoadProgress(100, '無法開啟這個 STEP', error instanceof Error ? error.message : '未知錯誤');
+    const detail = error instanceof Error ? error.message : '未知錯誤';
+    setLoadProgress(100, `無法開啟 ${schemaDisplay(entry.schema)}`, `${detail} 建議重新匯出為 AP214 或 AP242 的 B-rep solid／assembly。`);
   } finally {
     if (token === state.loadToken) elements.stepFileSelect.disabled = false;
   }
@@ -622,6 +665,7 @@ function buildManifest(result, entry) {
       distinctPartTypes: parts.length,
       occurrences: parts.reduce((sum, part) => sum + part.quantityInAssembly, 0),
       meshCount: result.meshes.length,
+      schema: entry.schema,
       fileEntry: entry
     }
   };
@@ -1113,7 +1157,7 @@ function updateDetails(part = null) {
     elements.selectionRole.textContent = '目前 STEP 的完整互動視圖；零件與 occurrence 由模型階層自動推導。';
     elements.selectionSwatch.style.background = 'linear-gradient(#f5b657, #7d8a9d)';
     elements.selectionData.innerHTML = `
-      <div><dt>格式</dt><dd>STEP</dd></div>
+      <div><dt>格式</dt><dd>${schemaDisplay(assembly.schema)}</dd></div>
       <div><dt>顯示單位</dt><dd>mm</dd></div>
       <div><dt>零件類型</dt><dd>${assembly.distinctPartTypes}</dd></div>
       <div><dt>Occurrence</dt><dd>${assembly.occurrences}（推導）</dd></div>
@@ -1165,6 +1209,7 @@ function renderArchiveData() {
     ['ZIP', state.archiveFile.name],
     ['ZIP 大小', formatBytes(state.archiveFile.size)],
     ['STEP 檔', `${state.stepFiles.length} 個`],
+    ['STEP schema', state.activeFile.schema.label],
     ['目前模型', state.activeFile.path],
     ['自動選擇', state.detectionReason]
   ];
@@ -1430,3 +1475,5 @@ window.addEventListener('beforeunload', () => {
 if (window.location.protocol === 'file:') {
   showUploadError('請透過 GitHub Pages 或本機 HTTP 伺服器開啟；WebAssembly 無法從 file:// 安全載入。');
 }
+
+trackUsage('page_view');

@@ -20,3 +20,10 @@ fixtures/
 derived/
 parts-manifest.json
 _site/
+analytics-worker/node_modules/
+analytics-worker/.wrangler/
+.env
+.env.*
+!.env.example
+.dev.vars
+.dev.vars.*

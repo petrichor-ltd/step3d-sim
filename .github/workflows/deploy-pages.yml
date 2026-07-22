@@ -30,8 +30,9 @@ jobs:
       - name: Prepare static artifact
         run: |
           mkdir -p _site
-          cp index.html app.js styles.css THIRD_PARTY_NOTICES.md .nojekyll _site/
+          cp index.html app.js analytics.js analytics-config.js styles.css THIRD_PARTY_NOTICES.md .nojekyll _site/
           cp -R vendor _site/vendor
+          if [ -f CNAME ]; then cp CNAME _site/CNAME; fi
           if [ -f og.png ]; then cp og.png _site/og.png; fi
 
       - name: Upload Pages artifact
@@ -50,4 +51,3 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
-

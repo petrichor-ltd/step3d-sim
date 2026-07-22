@@ -32,7 +32,7 @@
         <span class="wordmark-mark" aria-hidden="true">S3</span>
         <span>STEP/3D</span>
       </a>
-      <span class="privacy-badge"><i aria-hidden="true"></i>全程留在瀏覽器</span>
+      <span class="privacy-badge"><i aria-hidden="true"></i>模型全程留在瀏覽器</span>
     </header>
 
     <section class="upload-hero" aria-labelledby="upload-title">
@@ -65,14 +65,16 @@
         <div class="upload-rules" id="upload-help">
           <p><span aria-hidden="true">✓</span>檔案副檔名必須是 <strong>.zip</strong></p>
           <p><span aria-hidden="true">✓</span>ZIP 內至少包含一個 <strong>.step</strong> 或 <strong>.stp</strong></p>
+          <p><span aria-hidden="true">✓</span>自動辨識常用的 <strong>AP203／AP214／AP242</strong></p>
           <p><span aria-hidden="true">i</span>建議主組立命名包含 assembly、assy、main，或與 ZIP 同名</p>
         </div>
         <p class="local-note"><span aria-hidden="true">⌁</span>不需登入、不連 CAD 伺服器；重新整理後模型即從記憶體移除。</p>
+        <p class="usage-note"><span>匿名統計</span>只記錄瀏覽、STEP schema 與開啟成功／失敗；不傳檔名、模型或幾何。</p>
       </div>
     </section>
 
     <footer class="upload-footer">
-      <span>STEP AP203 / AP214 / AP242</span>
+      <span>辨識 STEP AP203 / AP214 / AP242</span>
       <span>瀏覽器端 Open Cascade + WebGL</span>
       <span>ZIP 上限 500 MB</span>
     </footer>
@@ -89,7 +91,7 @@
         </div>
       </div>
       <div class="topbar-meta">
-        <span class="status-pill local"><i aria-hidden="true"></i>僅本機</span>
+        <span class="status-pill local"><i aria-hidden="true"></i>模型僅本機</span>
         <span class="status-pill" id="model-summary">準備載入</span>
         <button class="secondary-button new-project-button" id="new-project" type="button">開啟其他 ZIP</button>
         <button class="icon-button mobile-only" id="open-details" type="button" aria-label="開啟零件資訊">ⓘ</button>

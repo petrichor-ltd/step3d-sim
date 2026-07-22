@@ -104,6 +104,8 @@ button:focus-visible, input:focus-visible, a:focus-visible, canvas:focus-visible
 .upload-rules strong { color: var(--text); font: 700 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
 .local-note { display: flex; align-items: center; justify-content: center; gap: 7px; margin: 14px 4px 0; color: var(--soft); font-size: 9px; text-align: center; }
 .local-note span { color: #58c9ad; font-size: 14px; }
+.usage-note { display: flex; align-items: flex-start; justify-content: center; gap: 7px; margin: 7px 4px 0; color: var(--soft); font-size: 9px; line-height: 1.45; text-align: center; }
+.usage-note span { flex: none; padding: 2px 5px; color: #a7d7cc; border: 1px solid rgba(88,201,173,.25); border-radius: 999px; background: rgba(88,201,173,.06); font-size: 8px; }
 .upload-error { margin: 14px 2px 0; padding: 11px 12px; color: #ffd1d5; border: 1px solid rgba(255,125,138,.35); border-radius: 8px; background: rgba(255,125,138,.07); font-size: 11px; line-height: 1.5; }
 .upload-status { margin: 15px 3px 2px; }
 .upload-status p { margin: 7px 0 0; color: var(--muted); font-size: 10px; }

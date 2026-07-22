@@ -1,8 +1,11 @@
 import { DASHBOARD_HTML } from './dashboard.js';
 
-const EVENTS = new Set(['page_view', 'zip_accepted', 'archive_rejected', 'model_opened', 'model_failed']);
+const EVENTS = new Set(['page_view', 'heartbeat', 'zip_accepted', 'archive_rejected', 'model_opened', 'model_failed']);
 const SCHEMAS = new Set(['AP203', 'AP214', 'AP242', 'Other', 'Unknown', 'None']);
 const FAILURES = new Set(['none', 'encrypted', 'compression', 'zip64', 'no_step', 'no_geometry', 'parse_failed', 'size_limit', 'archive_invalid', 'unknown']);
+const PUBLIC_ROUTE_PREFIX = '/api/analytics';
+const ONLINE_WINDOW_SECONDS = 180;
+const ACTIVE_SESSION_RETENTION_SECONDS = 3600;
 
 export function normalizeEvent(input) {
   if (!input || !EVENTS.has(input.event)) return null;
@@ -44,6 +47,12 @@ function json(data, status = 200, headers = {}) {
   });
 }
 
+function routedPath(url) {
+  if (url.pathname === PUBLIC_ROUTE_PREFIX) return '/';
+  if (url.pathname.startsWith(`${PUBLIC_ROUTE_PREFIX}/`)) return url.pathname.slice(PUBLIC_ROUTE_PREFIX.length);
+  return url.pathname;
+}
+
 function constantTimeEqual(left, right) {
   const a = new TextEncoder().encode(String(left ?? ''));
   const b = new TextEncoder().encode(String(right ?? ''));
@@ -76,9 +85,22 @@ async function recordEvent(request, env) {
   const now = new Date();
   const timestamp = now.toISOString();
   const day = timestamp.slice(0, 10);
+  const nowEpoch = Math.floor(now.getTime() / 1000);
+  const sessionHash = await sha256(`${env.ANALYTICS_SALT}|session|${payload.session}`);
+
+  await env.DB.prepare(`
+    INSERT INTO active_sessions (session_hash, last_seen_epoch)
+    VALUES (?, ?)
+    ON CONFLICT (session_hash)
+    DO UPDATE SET last_seen_epoch = excluded.last_seen_epoch
+  `).bind(sessionHash, nowEpoch).run();
+
+  if (payload.event === 'heartbeat') {
+    return json({ accepted: true }, 202, corsHeaders(request));
+  }
+
   const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown';
   const agent = request.headers.get('User-Agent') ?? 'unknown';
-  const sessionHash = await sha256(`${env.ANALYTICS_SALT}|session|${payload.session}`);
   const visitorHash = await sha256(`${env.ANALYTICS_SALT}|visitor|${day}|${ip}|${agent}`);
 
   const receipt = await env.DB.prepare(`
@@ -103,6 +125,20 @@ async function recordEvent(request, env) {
   }
 
   return json({ accepted: true, deduplicated: (receipt.meta?.changes ?? 0) === 0 }, 202, corsHeaders(request));
+}
+
+async function readPublicStats(env) {
+  if (!env.DB) return json({ error: 'Database is not configured' }, 503);
+  const onlineCutoff = Math.floor(Date.now() / 1000) - ONLINE_WINDOW_SECONDS;
+  const [viewsResult, onlineResult] = await env.DB.batch([
+    env.DB.prepare(`SELECT COALESCE(SUM(event_count), 0) AS total FROM usage_totals WHERE event_type = 'page_view'`),
+    env.DB.prepare(`SELECT COUNT(*) AS total FROM active_sessions WHERE last_seen_epoch >= ?`).bind(onlineCutoff)
+  ]);
+  return json({
+    totalViews: Number(viewsResult.results?.[0]?.total ?? 0),
+    onlineNow: Number(onlineResult.results?.[0]?.total ?? 0),
+    onlineWindowSeconds: ONLINE_WINDOW_SECONDS
+  });
 }
 
 async function readStats(request, env) {
@@ -153,14 +189,16 @@ async function readStats(request, env) {
 
 export async function handleRequest(request, env) {
   const url = new URL(request.url);
-  if (request.method === 'OPTIONS' && url.pathname === '/v1/event') {
+  const path = routedPath(url);
+  if (request.method === 'OPTIONS' && path === '/v1/event') {
     if (!isAllowedOrigin(request, env)) return new Response(null, { status: 403 });
     return new Response(null, { status: 204, headers: corsHeaders(request) });
   }
-  if (request.method === 'POST' && url.pathname === '/v1/event') return recordEvent(request, env);
-  if (request.method === 'GET' && url.pathname === '/v1/stats') return readStats(request, env);
-  if (request.method === 'GET' && url.pathname === '/') return json({ ok: true, service: 'STEP/3D analytics' });
-  if (request.method === 'GET' && url.pathname === '/admin') {
+  if (request.method === 'POST' && path === '/v1/event') return recordEvent(request, env);
+  if (request.method === 'GET' && path === '/v1/public-stats') return readPublicStats(env);
+  if (request.method === 'GET' && path === '/v1/stats') return readStats(request, env);
+  if (request.method === 'GET' && path === '/') return json({ ok: true, service: 'STEP/3D analytics' });
+  if (request.method === 'GET' && path === '/admin') {
     return new Response(DASHBOARD_HTML, {
       headers: {
         'Content-Type': 'text/html; charset=utf-8',
@@ -176,7 +214,7 @@ export async function handleRequest(request, env) {
       }
     });
   }
-  if (request.method === 'GET' && url.pathname === '/health') return json({ ok: true });
+  if (request.method === 'GET' && path === '/health') return json({ ok: true });
   return json({ error: 'Not found' }, 404);
 }
 
@@ -185,9 +223,11 @@ export default {
   async scheduled(_controller, env) {
     if (!env.DB) return;
     const cutoff = new Date(Date.now() - 180 * 86_400_000).toISOString().slice(0, 10);
+    const activeCutoff = Math.floor(Date.now() / 1000) - ACTIVE_SESSION_RETENTION_SECONDS;
     await env.DB.batch([
       env.DB.prepare('DELETE FROM daily_visitors WHERE day < ?').bind(cutoff),
-      env.DB.prepare('DELETE FROM event_receipts WHERE day < ?').bind(cutoff)
+      env.DB.prepare('DELETE FROM event_receipts WHERE day < ?').bind(cutoff),
+      env.DB.prepare('DELETE FROM active_sessions WHERE last_seen_epoch < ?').bind(activeCutoff)
     ]);
   }
 };

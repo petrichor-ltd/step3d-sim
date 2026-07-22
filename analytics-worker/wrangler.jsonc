@@ -10,8 +10,8 @@
   },
   "routes": [
     {
-      "pattern": "step3d-analytics.petrichor.tw",
-      "custom_domain": true
+      "pattern": "step3d-sim.petrichor.tw/api/analytics/*",
+      "zone_name": "petrichor.tw"
     }
   ],
   "d1_databases": [

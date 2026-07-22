@@ -42,6 +42,7 @@ test('normalizes only fixed event fields', () => {
   assert.deepEqual(normalizeEvent({ event: 'model_opened', schema: 'AP214', failure: 'none', session: '12345678-abcd' }), {
     event: 'model_opened', schema: 'AP214', failure: 'none', session: '12345678-abcd'
   });
+  assert.equal(normalizeEvent({ event: 'heartbeat', session: '12345678-abcd' }).event, 'heartbeat');
   assert.equal(normalizeEvent({ event: 'model_name', session: '12345678' }), null);
   assert.equal(normalizeEvent({ event: 'page_view', session: 'bad' }), null);
 });
@@ -62,12 +63,28 @@ test('records aggregate event without model metadata', async () => {
   });
   const response = await handleRequest(request, env);
   assert.equal(response.status, 202);
-  assert.equal(database.runs.length, 3);
+  assert.equal(database.runs.length, 4);
   const serialized = JSON.stringify(database.runs);
   assert.equal(serialized.includes('secret.step'), false);
   assert.equal(serialized.includes('192.0.2.10'), false);
   assert.equal(serialized.includes('model_opened'), true);
   assert.equal(serialized.includes('AP242'), true);
+});
+
+test('heartbeat updates only anonymous presence', async () => {
+  const database = new MockDatabase();
+  const request = new Request('https://step3d-sim.petrichor.tw/api/analytics/v1/event', {
+    method: 'POST',
+    headers: { Origin: origin, 'Content-Type': 'application/json', 'CF-Connecting-IP': '192.0.2.20', 'User-Agent': 'private-agent' },
+    body: JSON.stringify({ event: 'heartbeat', session: '12345678-abcd', filename: 'secret.step' })
+  });
+  const response = await handleRequest(request, { DB: database, ANALYTICS_SALT: 'test-salt', ALLOWED_ORIGIN: origin });
+  assert.equal(response.status, 202);
+  assert.equal(database.runs.length, 1);
+  assert.match(database.runs[0].sql, /active_sessions/);
+  const serialized = JSON.stringify(database.runs);
+  assert.doesNotMatch(serialized, /secret\.step|192\.0\.2\.20|private-agent/);
+  assert.doesNotMatch(serialized, /usage_totals|daily_visitors|event_receipts/);
 });
 
 test('rejects oversized payloads even without a Content-Length header', async () => {
@@ -99,7 +116,7 @@ test('rejects unauthorized stats and serves dashboard securely', async () => {
   const unauthorized = await handleRequest(new Request('https://analytics.example/v1/stats'), { ADMIN_TOKEN: 'secret', DB: new MockDatabase() });
   assert.equal(unauthorized.status, 401);
 
-  const dashboard = await handleRequest(new Request('https://analytics.example/admin'), {});
+  const dashboard = await handleRequest(new Request('https://step3d-sim.petrichor.tw/api/analytics/admin'), {});
   assert.equal(dashboard.status, 200);
   assert.match(dashboard.headers.get('Content-Security-Policy'), /frame-ancestors 'none'/);
   assert.equal(dashboard.headers.get('Cross-Origin-Resource-Policy'), 'same-origin');
@@ -108,8 +125,24 @@ test('rejects unauthorized stats and serves dashboard securely', async () => {
   assert.match(dashboardHtml, /autocomplete="off"/);
   assert.doesNotMatch(dashboardHtml, /autocomplete="current-password"/);
 
-  const root = await handleRequest(new Request('https://analytics.example/'), {});
+  const root = await handleRequest(new Request('https://step3d-sim.petrichor.tw/api/analytics/'), {});
   assert.deepEqual(await root.json(), { ok: true, service: 'STEP/3D analytics' });
+});
+
+test('returns public total views and current online count', async () => {
+  const database = new MockDatabase();
+  database.batchResults = [
+    { results: [{ total: 123 }] },
+    { results: [{ total: 4 }] }
+  ];
+  const response = await handleRequest(
+    new Request('https://step3d-sim.petrichor.tw/api/analytics/v1/public-stats'),
+    { DB: database }
+  );
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { totalViews: 123, onlineNow: 4, onlineWindowSeconds: 180 });
+  assert.equal(response.headers.get('Cache-Control'), 'no-store');
+  assert.match(database.batchStatements[1].sql, /active_sessions/);
 });
 
 test('returns aggregate stats for an authorized admin', async () => {

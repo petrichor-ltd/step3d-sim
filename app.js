@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { unzip } from './vendor/fflate/fflate.module.js';
-import { trackUsage } from './analytics.js';
+import { startUsageMetrics, trackUsage } from './analytics.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => [...root.querySelectorAll(selector)];
@@ -1467,13 +1467,19 @@ $$('[data-close-panel]').forEach((button) => {
   button.addEventListener('click', () => $(`#${button.dataset.closePanel}`).removeAttribute('data-open'));
 });
 
-window.addEventListener('beforeunload', () => {
-  state.currentWorker?.terminate();
-  state.downloadUrls.forEach((url) => URL.revokeObjectURL(url));
-});
-
 if (window.location.protocol === 'file:') {
   showUploadError('請透過 GitHub Pages 或本機 HTTP 伺服器開啟；WebAssembly 無法從 file:// 安全載入。');
 }
 
 trackUsage('page_view');
+const usageNumber = new Intl.NumberFormat('zh-Hant-TW', { maximumFractionDigits: 0 });
+const stopUsageMetrics = startUsageMetrics(({ totalViews, onlineNow }) => {
+  $$('[data-usage-total]').forEach((element) => { element.textContent = usageNumber.format(totalViews); });
+  $$('[data-usage-online]').forEach((element) => { element.textContent = usageNumber.format(onlineNow); });
+});
+
+window.addEventListener('beforeunload', () => {
+  stopUsageMetrics();
+  state.currentWorker?.terminate();
+  state.downloadUrls.forEach((url) => URL.revokeObjectURL(url));
+});
